@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NIDS Threat Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0e0d;
+    --panel:#101614;
+    --panel-border:#1e2b27;
+    --text:#d7e4de;
+    --muted:#6d8b81;
+    --accent:#39ff8f;
+    --accent-dim:#1f8f56;
+    --high:#ff4d4d;
+    --medium:#ffb648;
+    --low:#39d1ff;
+    --mono: 'SF Mono','JetBrains Mono','Consolas',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:var(--mono);
+    padding:28px 32px 60px;
+  }
+  .scan-line{
+    position:fixed; top:0; left:0; width:100%; height:2px;
+    background:linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity:.5; animation:scan 6s linear infinite; pointer-events:none;
+  }
+  @keyframes scan{0%{top:0}100%{top:100%}}
+  header{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:22px; border-bottom:1px solid var(--panel-border); padding-bottom:16px;}
+  header h1{font-size:20px; letter-spacing:2px; margin:0; text-transform:uppercase; color:var(--accent);}
+  header .sub{color:var(--muted); font-size:12px; margin-top:6px;}
+  .status{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--accent);}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse 1.6s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px;}
+  .kpi{background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:14px 16px;}
+  .kpi .label{font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted);}
+  .kpi .value{font-size:26px; margin-top:6px; color:var(--text);}
+  .kpi.high .value{color:var(--high);}
+  .kpi.accent .value{color:var(--accent);}
+
+  .grid{display:grid; grid-template-columns:1.3fr 1fr; gap:16px; margin-bottom:16px;}
+  .grid3{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;}
+  .panel{background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:16px;}
+  .panel h2{font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); margin:0 0 12px;}
+  canvas{max-height:230px;}
+
+  table{width:100%; border-collapse:collapse; font-size:12px;}
+  th{text-align:left; color:var(--muted); font-weight:normal; text-transform:uppercase; font-size:10px; letter-spacing:1px; padding:6px 8px; border-bottom:1px solid var(--panel-border);}
+  td{padding:7px 8px; border-bottom:1px solid #14201c;}
+  tr:hover td{background:#0e1815;}
+  .sev{padding:2px 7px; border-radius:3px; font-size:10px; letter-spacing:.5px;}
+  .sev.HIGH{background:rgba(255,77,77,.15); color:var(--high); border:1px solid var(--high);}
+  .sev.MEDIUM{background:rgba(255,182,72,.15); color:var(--medium); border:1px solid var(--medium);}
+  .sev.LOW{background:rgba(57,209,255,.15); color:var(--low); border:1px solid var(--low);}
+  footer{color:var(--muted); font-size:11px; margin-top:20px; text-align:center;}
+</style>
+</head>
+<body>
+<div class="scan-line"></div>
+
+<header>
+  <div>
+    <h1>&gt; Network Intrusion Detection — Live Threat Board</h1>
+    <div class="sub" id="rangeLabel">Loading feed…</div>
+  </div>
+  <div class="status"><span class="dot"></span> SENSOR ONLINE — SURICATA IDS</div>
+</header>
+
+<div class="kpis">
+  <div class="kpi accent"><div class="label">Total Alerts</div><div class="value" id="kpiTotal">–</div></div>
+  <div class="kpi high"><div class="label">High Severity</div><div class="value" id="kpiHigh">–</div></div>
+  <div class="kpi"><div class="label">Unique Attackers</div><div class="value" id="kpiIPs">–</div></div>
+  <div class="kpi"><div class="label">Top Target</div><div class="value" id="kpiTarget" style="font-size:16px;">–</div></div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Alerts Over Time</h2>
+    <canvas id="timeChart"></canvas>
+  </div>
+  <div class="panel">
+    <h2>Severity Breakdown</h2>
+    <canvas id="sevChart"></canvas>
+  </div>
+</div>
+
+<div class="grid3">
+  <div class="panel">
+    <h2>Top Attacking Source IPs</h2>
+    <canvas id="ipChart"></canvas>
+  </div>
+  <div class="panel">
+    <h2>Attack Category Frequency</h2>
+    <canvas id="catChart"></canvas>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Recent Alerts</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Severity</th><th>Source IP</th><th>Target</th><th>Signature</th></tr></thead>
+    <tbody id="alertTable"></tbody>
+  </table>
+</div>
+
+<footer>Task 4 — Network Intrusion Detection System · Data source: alerts_sample.json (swap in real eve.json via eve_to_dashboard_json.py)</footer>
+
+<script>
+const COLORS = { HIGH:'#ff4d4d', MEDIUM:'#ffb648', LOW:'#39d1ff' };
+
+Chart.defaults.color = '#6d8b81';
+Chart.defaults.font.family = "'SF Mono','JetBrains Mono',monospace";
+Chart.defaults.borderColor = '#1e2b27';
+
+async function loadData(){
+  const res = await fetch('alerts_sample.json');
+  return res.json();
+}
+
+function fmtTime(ts){
+  const d = new Date(ts);
+  return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+(async () => {
+  const data = await loadData();
+  data.sort((a,b)=> new Date(a.timestamp) - new Date(b.timestamp));
+
+  document.getElementById('rangeLabel').textContent =
+    `${data.length} events · ${fmtTime(data[0].timestamp)} → ${fmtTime(data[data.length-1].timestamp)}`;
+
+  // KPIs
+  const high = data.filter(d=>d.severity==='HIGH').length;
+  const ips = new Set(data.map(d=>d.src_ip));
+  const targetCounts = {};
+  data.forEach(d=> targetCounts[d.dest_ip] = (targetCounts[d.dest_ip]||0)+1);
+  const topTarget = Object.entries(targetCounts).sort((a,b)=>b[1]-a[1])[0];
+
+  document.getElementById('kpiTotal').textContent = data.length;
+  document.getElementById('kpiHigh').textContent = high;
+  document.getElementById('kpiIPs').textContent = ips.size;
+  document.getElementById('kpiTarget').textContent = topTarget ? topTarget[0] : '–';
+
+  // Time series (bucket by hour)
+  const buckets = {};
+  data.forEach(d=>{
+    const dt = new Date(d.timestamp);
+    const key = `${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours()}:00`;
+    buckets[key] = (buckets[key]||0)+1;
+  });
+  new Chart(document.getElementById('timeChart'), {
+    type:'line',
+    data:{ labels:Object.keys(buckets), datasets:[{
+      data:Object.values(buckets), borderColor:'#39ff8f', backgroundColor:'rgba(57,255,143,.12)',
+      fill:true, tension:.35, pointRadius:2
+    }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'#14201c'}}, y:{grid:{color:'#14201c'}, beginAtZero:true} } }
+  });
+
+  // Severity pie
+  const sevCounts = {HIGH:0, MEDIUM:0, LOW:0};
+  data.forEach(d=> sevCounts[d.severity] = (sevCounts[d.severity]||0)+1);
+  new Chart(document.getElementById('sevChart'), {
+    type:'doughnut',
+    data:{ labels:Object.keys(sevCounts), datasets:[{ data:Object.values(sevCounts),
+      backgroundColor:Object.keys(sevCounts).map(k=>COLORS[k]), borderColor:'#101614', borderWidth:2 }]},
+    options:{ plugins:{legend:{position:'bottom', labels:{boxWidth:10}}} }
+  });
+
+  // Top attacking IPs
+  const ipCounts = {};
+  data.forEach(d=> ipCounts[d.src_ip] = (ipCounts[d.src_ip]||0)+1);
+  const topIPs = Object.entries(ipCounts).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  new Chart(document.getElementById('ipChart'), {
+    type:'bar',
+    data:{ labels:topIPs.map(x=>x[0]), datasets:[{ data:topIPs.map(x=>x[1]), backgroundColor:'#1f8f56' }]},
+    options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'#14201c'}}, y:{grid:{display:false}} } }
+  });
+
+  // Category frequency
+  const catCounts = {};
+  data.forEach(d=> catCounts[d.category] = (catCounts[d.category]||0)+1);
+  new Chart(document.getElementById('catChart'), {
+    type:'bar',
+    data:{ labels:Object.keys(catCounts), datasets:[{ data:Object.values(catCounts), backgroundColor:'#39d1ff' }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false}, ticks:{font:{size:9}}}, y:{grid:{color:'#14201c'}} } }
+  });
+
+  // Recent alerts table (most recent 15)
+  const tbody = document.getElementById('alertTable');
+  data.slice().reverse().slice(0,15).forEach(d=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${fmtTime(d.timestamp)}</td>
+      <td><span class="sev ${d.severity}">${d.severity}</span></td>
+      <td>${d.src_ip}</td>
+      <td>${d.dest_ip}:${d.dest_port}</td>
+      <td>${d.signature}</td>`;
+    tbody.appendChild(tr);
+  });
+})();
+</script>
+</body>
+</html>

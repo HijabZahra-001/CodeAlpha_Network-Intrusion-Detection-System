@@ -1,0 +1,77 @@
+# =====================================================================
+# TASK 4 - Network Intrusion Detection System
+# Key sections to edit inside /etc/suricata/suricata.yaml
+# (Do not replace the whole file — Suricata's default yaml is huge;
+#  only these sections need to be added/changed.)
+# =====================================================================
+
+# ---------------------------------------------------------------
+# 1. Define your protected network (edit the interface IP range)
+# ---------------------------------------------------------------
+vars:
+  address-groups:
+    HOME_NET: "[192.168.1.0/24]"     # <-- change to your lab/VM subnet
+    EXTERNAL_NET: "!$HOME_NET"
+
+# ---------------------------------------------------------------
+# 2. Load our custom rules alongside the default community ruleset
+# ---------------------------------------------------------------
+default-rule-path: /etc/suricata/rules
+
+rule-files:
+  - suricata.rules      # official Emerging Threats Open ruleset (via suricata-update)
+  - local.rules          # our custom rules (this project) - place in /etc/suricata/rules/
+
+# ---------------------------------------------------------------
+# 3. Enable EVE JSON logging (this is what our Python scripts read
+#    for alerting, response, and the dashboard)
+# ---------------------------------------------------------------
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert:
+            payload: yes
+            payload-printable: yes
+            packet: yes
+            metadata: yes
+            http-body: yes
+            tagged-packets: yes
+        - http:
+            extended: yes
+        - dns:
+            enabled: yes
+        - tls:
+            enabled: yes
+        - flow:
+            enabled: yes
+        - netflow:
+            enabled: yes
+
+  - stats:
+      enabled: yes
+      filename: stats.log
+      interval: 30
+
+  - fast:
+      enabled: yes
+      filename: fast.log      # simple 1-line-per-alert log (also used by monitor script)
+
+# ---------------------------------------------------------------
+# 4. Run mode - choose based on how traffic reaches the sensor
+# ---------------------------------------------------------------
+# af-packet is recommended for a live NIC in IDS (listen-only) mode:
+af-packet:
+  - interface: eth0          # <-- change to the interface Suricata should monitor
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+
+# ---------------------------------------------------------------
+# 5. Set run mode to IDS (alert-only). For inline IPS mode (drop
+#    packets automatically) you would instead configure NFQUEUE and
+#    add "drop" rules — that is what the response script emulates
+#    in software for environments where inline IPS is not possible.
+# ---------------------------------------------------------------
