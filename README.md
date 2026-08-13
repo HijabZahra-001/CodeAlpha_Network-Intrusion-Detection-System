@@ -1,4 +1,4 @@
-# Network Intrusion Detection System (NIDS) — Task 4
+# Network Intrusion Detection System (NIDS) 
 
 Built with **Suricata**. Covers all five task requirements:
 1. IDS setup (Suricata)
